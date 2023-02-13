@@ -1,4 +1,4 @@
-name: Rust
+name: Fusion build
 
 on:
   push:
@@ -9,33 +9,54 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  build_circuit:
     runs-on: self-hosted
-
     steps:
-    - uses: actions/checkout@v3
-    - name: ⚡ Cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-    - name: Compile circuit
-      run: cd circuits && zokrates compile -i fusion.zok
-    - name: Compute trusted setup
-      run: cd circuits && zokrates setup
-    - name: Set up nightly
-      run: rustup default nightly-2023-01-03
-    - name: Install dependencies
-      run: rustup component add clippy rustfmt
-    - name: Build
-      run: cargo build
-    - name: Run tests
-      run: cargo test
-    - name: Lint
-      run: cargo clippy --all --all-features -- -D warnings
-    - name: Format
-      run: cargo fmt --check --verbose
+      - uses: actions/checkout@v3
+      - name: ⚡ Cache Circuits
+        id: cache-circuits
+        uses: actions/cache@v3
+        with:
+          path: ${{ github.workspace }}/circuits
+          key: cache-circuits-${{ hashFiles('out') }}
+      - name: Compile circuit
+        if: steps.cache-circuits.outputs.cache-hit != 'true'
+        run: cd circuits && zokrates compile -i fusion.zok
+      - name: Compute trusted setup
+        if: steps.cache-circuits.outputs.cache-hit != 'true'
+        run: cd circuits && zokrates setup
+
+  build:
+    needs: build_circuit
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v3
+      - name: ⚡ Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+      - name: Install Rust nightly
+        uses: actions-rs/toolchain@v1
+        with:
+            profile: minimal
+            toolchain: nightly
+            override: true
+            components: rustfmt, clippy
+      - name: Restore cached circuits
+        id: cache-circuits
+        uses: actions/cache/restore@v3
+        with:
+          path: ${{ github.workspace }}/circuits
+          key: cache-circuits-${{ hashFiles('out') }}
+      - name: Build
+        run: cargo build
+      - name: Run tests
+        run: cargo test
+      - name: Lint
+        run: cargo clippy --all --all-features -- -D warnings
+      - name: Format
+        run: cargo fmt --check --verbose
